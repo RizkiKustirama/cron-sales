@@ -60,6 +60,7 @@ def handle_help(message):
         "Cukup kirimkan teks postingan, link sosmed, atau screenshot gambar ke bot ini. AI Gemini akan otomatis mengekstrak nama, email, tipe project, dan kebutuhan usaha, lalu menampilkan kartu verifikasi.\n\n"
         "🎮 <b>2. Daftar Perintah Pengendali Pipeline:</b>\n"
         "• <code>/status</code> ➔ Melihat ringkasan jumlah prospek di setiap status pipeline secara live dari Google Sheets.\n"
+        "• <code>/find &lt;kata_kunci&gt;</code> ➔ Mencari ID prospek (LD-xxxx), status, dan kontak berdasarkan nama/email.\n"
         "• <code>/replied &lt;email/id&gt;</code> ➔ Menandai prospek telah membalas email/chat (mematikan follow-up otomatis).\n"
         "• <code>/scheduled &lt;email/id&gt;</code> ➔ Menandai meeting terjadwal secara manual jika klien sepakat meeting di WA tanpa lewat link Calendly.\n"
         "• <code>/deal &lt;email/id&gt;</code> ➔ Menandai prospek resmi closing/membayar proyek 🎉\n"
@@ -76,6 +77,74 @@ def handle_help(message):
         "• <b>Deal / No Deal:</b> Hasil akhir negosiasi."
     )
     bot.reply_to(message, text, parse_mode="HTML")
+
+
+@bot.message_handler(commands=["find", "cekid", "search"])
+def handle_find(message):
+    if not is_authorized(message):
+        return
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        bot.reply_to(
+            message,
+            "Format: <code>/find &lt;nama_atau_email_atau_id&gt;</code>\n"
+            "Contoh: <code>/find hendra</code> atau <code>/find maya</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    keyword = args[1].strip().lower()
+    try:
+        leads = sheets.get_leads()
+        matches = []
+        for l in reversed(leads):
+            nama = str(l.get("nama", "")).lower()
+            email = str(l.get("email", "")).lower()
+            lead_id = str(l.get("lead_id", "")).lower()
+            kontak = str(l.get("kontak_lain", "")).lower()
+            if keyword in nama or keyword in email or keyword in lead_id or keyword in kontak:
+                matches.append(l)
+
+        if not matches:
+            bot.reply_to(
+                message,
+                f"❌ Tidak ditemukan prospek dengan kata kunci: <code>{html.escape(keyword)}</code>",
+                parse_mode="HTML",
+            )
+            return
+
+        total_match = len(matches)
+        display_matches = matches[:5]
+        res_text = f"🔍 <b>Hasil Pencarian Prospek:</b> (Ditemukan {total_match})\n\n"
+
+        for idx, item in enumerate(display_matches):
+            l_id = html.escape(str(item.get("lead_id") or "-"))
+            l_nama = html.escape(str(item.get("nama") or "-"))
+            l_email = html.escape(str(item.get("email") or "-"))
+            l_kontak = html.escape(str(item.get("kontak_lain") or "-"))
+            l_prod = html.escape(str(item.get("nama_produk_atau_jasa") or "-"))
+            l_status = html.escape(str(item.get("status") or "-"))
+
+            res_text += (
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"🆔 <b>ID:</b> <code>{l_id}</code>\n"
+                f"👤 <b>Nama:</b> {l_nama}\n"
+                f"✉️ <b>Email:</b> {l_email}\n"
+                f"📞 <b>Kontak:</b> {l_kontak}\n"
+                f"🏷️ <b>Produk:</b> {l_prod}\n"
+                f"📌 <b>Status:</b> <b>{l_status}</b>\n"
+                f"💡 <i>Gunakan ID untuk aksi:</i>\n"
+                f"<code>/deal {l_id}</code> | <code>/nodeal {l_id}</code> | <code>/replied {l_id}</code>\n"
+            )
+
+        if total_match > 5:
+            res_text += f"\n<i>(Menampilkan 5 data terbaru dari {total_match} hasil)</i>"
+
+        bot.reply_to(message, res_text, parse_mode="HTML")
+
+    except Exception as e:
+        logger.error(f"Error command /find: {e}")
+        bot.reply_to(message, f"❌ Gagal mencari data prospek: {e}")
 
 
 @bot.message_handler(commands=["cleardraft"])
