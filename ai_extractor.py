@@ -66,12 +66,26 @@ def _clean_json_response(raw_text: str) -> dict:
         raise ValueError(f"Gagal mem-parsing output JSON dari AI: {raw_text}")
 
 
-def extract_lead_from_text(text: str) -> dict:
-    """Mengekstrak data lead dari input teks atau link."""
-    model = genai.GenerativeModel(
-        model_name="gemini-2.5-flash",
+def _get_generative_model():
+    """Mengambil model Gemini yang tersedia dengan fallback otomatis."""
+    candidate_models = ["gemini-3.8-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    for model_name in candidate_models:
+        try:
+            return genai.GenerativeModel(
+                model_name=model_name,
+                system_instruction=SYSTEM_PROMPT,
+            )
+        except Exception:
+            continue
+    return genai.GenerativeModel(
+        model_name="gemini-1.5-flash",
         system_instruction=SYSTEM_PROMPT,
     )
+
+
+def extract_lead_from_text(text: str) -> dict:
+    """Mengekstrak data lead dari input teks atau link."""
+    model = _get_generative_model()
     response = model.generate_content(f"Ekstrak data prospek berikut:\n\n{text}")
     parsed = _clean_json_response(response.text)
     return _build_lead_object(parsed, raw_source=text)
@@ -79,10 +93,7 @@ def extract_lead_from_text(text: str) -> dict:
 
 def extract_lead_from_image(image: Image.Image, caption: str = "") -> dict:
     """Mengekstrak data lead dari gambar screenshot (Multimodal)."""
-    model = genai.GenerativeModel(
-        model_name="gemini-2.5-flash",
-        system_instruction=SYSTEM_PROMPT,
-    )
+    model = _get_generative_model()
     prompt = "Ekstrak informasi prospek bisnis dari screenshot berikut."
     if caption:
         prompt += f" Catatan tambahan pengirim: {caption}"
