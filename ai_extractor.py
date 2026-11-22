@@ -65,34 +65,37 @@ def _clean_json_response(raw_text: str) -> dict:
 
 def _call_gemini_api(parts: list) -> dict:
     """Memanggil Gemini API via REST HTTPS dengan hemat request tanpa membakar kuota."""
-    # Gunakan model stabil yang aktif dan tidak deprecated
+    # Gunakan model Pro & Flash dengan timeout 35 detik
     candidate_models = [
+        "gemini-2.5-pro",
         "gemini-3.7-flash",
-        "gemini-3.5-flash",
-        "gemini-flash-latest",
+        "gemini-3.1-pro-preview",
         "gemini-3.8-flash",
     ]
     headers = {"Content-Type": "application/json"}
     payload = {
         "contents": [{"parts": parts}],
         "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-        "generationConfig": {"temperature": 0.2},
+        "generationConfig": {
+            "temperature": 0.1,
+            "responseMimeType": "application/json",
+        },
     }
 
     last_error = None
     for model_name in candidate_models:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={config.GEMINI_API_KEY}"
         try:
-            resp = requests.post(url, headers=headers, json=payload, timeout=15)
+            print(f"Mencoba model: {model_name}...")
+            resp = requests.post(url, headers=headers, json=payload, timeout=35)
             if resp.status_code == 200:
                 data = resp.json()
                 raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
                 return _clean_json_response(raw_text)
             else:
-                print(f"DEBUG: {model_name} -> HTTP {resp.status_code}: {resp.text[:150]}")
+                print(f"DEBUG: {model_name} -> HTTP {resp.status_code}: {resp.text[:120]}")
                 last_error = f"HTTP {resp.status_code} ({model_name})"
                 if resp.status_code == 429:
-                    # Jika kena rate limit, hentikan agar tidak membakar kuota
                     break
         except Exception as e:
             print(f"DEBUG: {model_name} -> Exception: {e}")
