@@ -1,14 +1,12 @@
 import json
 import random
 import re
+import base64
+import io
 from datetime import datetime
 from PIL import Image
-import google.generativeai as genai
+import requests
 import config
-
-# Inisialisasi Gemini API
-if config.GEMINI_API_KEY:
-    genai.configure(api_key=config.GEMINI_API_KEY)
 
 SYSTEM_PROMPT = """
 Anda adalah asisten sales analis data B2B. Tugas Anda adalah mengekstrak data prospek dari teks chat, link sosmed, atau screenshot menjadi format JSON murni.
@@ -59,47 +57,72 @@ def _clean_json_response(raw_text: str) -> dict:
     try:
         return json.loads(cleaned)
     except Exception:
-        # Fallback parsing jika model menambahkan teks pengantar
         match = re.search(r"\{.*\}", cleaned, re.DOTALL)
         if match:
             return json.loads(match.group(0))
-        raise ValueError(f"Gagal mem-parsing output JSON dari AI: {raw_text}")
+        raise ValueError(f"Gagal mem-parsing output JSON: {raw_text}")
 
 
-def _get_generative_model():
-    """Mengambil model Gemini yang tersedia dengan fallback otomatis."""
-    candidate_models = ["gemini-3.8-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+def _call_gemini_api(parts: list) -> dict:
+    """Memanggil Gemini API via REST HTTPS dengan hemat request tanpa membakar kuota."""
+    # Gunakan model stabil yang aktif dan tidak deprecated
+    candidate_models = [
+        "gemini-3.7-flash",
+        "gemini-3.5-flash",
+        "gemini-flash-latest",
+        "gemini-3.8-flash",
+    ]
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "contents": [{"parts": parts}],
+        "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+        "generationConfig": {"temperature": 0.2},
+    }
+
+    last_error = None
     for model_name in candidate_models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={config.GEMINI_API_KEY}"
         try:
-            return genai.GenerativeModel(
-                model_name=model_name,
-                system_instruction=SYSTEM_PROMPT,
-            )
-        except Exception:
-            continue
-    return genai.GenerativeModel(
-        model_name="gemini-1.5-flash",
-        system_instruction=SYSTEM_PROMPT,
-    )
+            resp = requests.post(url, headers=headers, json=payload, timeout=15)
+            if resp.status_code == 200:
+                data = resp.json()
+                raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
+                return _clean_json_response(raw_text)
+            else:
+                print(f"DEBUG: {model_name} -> HTTP {resp.status_code}: {resp.text[:150]}")
+                last_error = f"HTTP {resp.status_code} ({model_name})"
+                if resp.status_code == 429:
+                    # Jika kena rate limit, hentikan agar tidak membakar kuota
+                    break
+        except Exception as e:
+            print(f"DEBUG: {model_name} -> Exception: {e}")
+            last_error = str(e)
+
+    raise RuntimeError(f"Gagal memanggil Gemini API: {last_error}")
 
 
 def extract_lead_from_text(text: str) -> dict:
     """Mengekstrak data lead dari input teks atau link."""
-    model = _get_generative_model()
-    response = model.generate_content(f"Ekstrak data prospek berikut:\n\n{text}")
-    parsed = _clean_json_response(response.text)
+    parts = [{"text": f"Ekstrak data prospek berikut:\n\n{text}"}]
+    parsed = _call_gemini_api(parts)
     return _build_lead_object(parsed, raw_source=text)
 
 
 def extract_lead_from_image(image: Image.Image, caption: str = "") -> dict:
     """Mengekstrak data lead dari gambar screenshot (Multimodal)."""
-    model = _get_generative_model()
-    prompt = "Ekstrak informasi prospek bisnis dari screenshot berikut."
-    if caption:
-        prompt += f" Catatan tambahan pengirim: {caption}"
+    buffered = io.BytesIO()
+    image.save(buffered, format="JPEG")
+    img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-    response = model.generate_content([prompt, image])
-    parsed = _clean_json_response(response.text)
+    prompt_text = "Ekstrak informasi prospek bisnis dari screenshot berikut."
+    if caption:
+        prompt_text += f" Catatan tambahan pengirim: {caption}"
+
+    parts = [
+        {"text": prompt_text},
+        {"inlineData": {"mimeType": "image/jpeg", "data": img_b64}},
+    ]
+    parsed = _call_gemini_api(parts)
     return _build_lead_object(parsed, raw_source=f"Screenshot + Caption: {caption}")
 
 
