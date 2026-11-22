@@ -15,9 +15,11 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 # Google Sheets
 GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID", "")
-GOOGLE_CREDENTIALS_FILE = os.getenv(
-    "GOOGLE_CREDENTIALS_FILE", str(BASE_DIR / "google_credentials.json")
-)
+_creds_env = os.getenv("GOOGLE_CREDENTIALS_FILE", "google_credentials.json")
+if os.path.isabs(_creds_env):
+    GOOGLE_CREDENTIALS_FILE = _creds_env
+else:
+    GOOGLE_CREDENTIALS_FILE = str(BASE_DIR / _creds_env)
 
 # Gmail Outbound
 GMAIL_SENDER_EMAIL = os.getenv("GMAIL_SENDER_EMAIL", "")

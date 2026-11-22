@@ -139,12 +139,22 @@ class SheetsHelper:
         return True
 
     def find_lead_by_email(self, email):
-        """Mencari baris lead berdasarkan alamat email (case-insensitive)."""
+        """Mencari baris lead berdasarkan alamat email (memprioritaskan prospek aktif & paling baru)."""
         leads = self.get_leads()
         target = email.lower().strip()
-        for lead in leads:
+
+        # 1. Prioritaskan baris terbaru yang statusnya masih aktif dalam siklus outreach
+        active_statuses = {"baru", "penawaran terkirim", "follow up 1", "follow up 2"}
+        for lead in reversed(leads):
+            if lead.get("email", "").lower().strip() == target:
+                if str(lead.get("status", "")).strip().lower() in active_statuses:
+                    return lead
+
+        # 2. Fallback: ambil baris paling terbaru (baris paling bawah)
+        for lead in reversed(leads):
             if lead.get("email", "").lower().strip() == target:
                 return lead
+
         return None
 
     def get_pipeline_summary(self):

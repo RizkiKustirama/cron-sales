@@ -1,3 +1,4 @@
+import html
 import logging
 from datetime import datetime
 from fastapi import FastAPI, Request, HTTPException
@@ -65,17 +66,17 @@ async def calendly_webhook(request: Request):
                     notes=f"Booking via Calendly ({start_time})",
                 )
 
-                revived_text = " *(🎉 PROSPEK BANGKIT DARI NO DEAL!)*" if was_no_deal else ""
+                revived_text = " <b>(🎉 PROSPEK BANGKIT DARI NO DEAL!)</b>" if was_no_deal else ""
                 alert_msg = (
-                    f"🔥 **PROSPEK BOOKING MEETING!**{revived_text}\n\n"
-                    f"👤 Nama: *{invitee_name}*\n"
-                    f"✉️ Email: `{invitee_email}`\n"
-                    f"📌 Status Sebelumnya: *{old_status}*\n"
-                    f"📅 Jadwal: `{start_time}`\n\n"
-                    f"Status di Google Sheets otomatis diubah ke *Meeting Scheduled*. "
+                    f"🔥 <b>PROSPEK BOOKING MEETING!</b>{revived_text}\n\n"
+                    f"👤 Nama: <b>{html.escape(invitee_name)}</b>\n"
+                    f"✉️ Email: <code>{html.escape(invitee_email)}</code>\n"
+                    f"📌 Status Sebelumnya: <b>{html.escape(old_status)}</b>\n"
+                    f"📅 Jadwal: <code>{html.escape(start_time)}</code>\n\n"
+                    f"Status di Google Sheets otomatis diubah ke <b>Meeting Scheduled</b>. "
                     f"Follow-up email dihentikan!"
                 )
-                send_telegram_alert(alert_msg)
+                send_telegram_alert(alert_msg, parse_mode="HTML")
             else:
                 logger.info(f"Email {invitee_email} booking di Calendly tapi tidak ditemukan di tab Leads.")
 

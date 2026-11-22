@@ -1,3 +1,4 @@
+import html
 import io
 import logging
 import telebot
@@ -24,18 +25,65 @@ def is_authorized(message_or_call) -> bool:
     return user_id == allowed_id
 
 
-@bot.message_handler(commands=["start", "help"])
+def send_telegram_alert(text: str, parse_mode: str = "HTML"):
+    """Mengirim pesan notifikasi / laporan ke akun Telegram admin."""
+    chat_id = config.TELEGRAM_ALLOWED_CHAT_ID
+    if not chat_id:
+        return
+    try:
+        bot.send_message(chat_id, text, parse_mode=parse_mode)
+    except Exception as e:
+        logger.warning(f"Gagal mengirim notifikasi Telegram: {e}")
+
+
+@bot.message_handler(commands=["start"])
 def handle_start(message):
     if not is_authorized(message):
         return
     text = (
-        "🤖 **Sales Command Center Bot Siap!**\n\n"
-        "Cara pakai:\n"
-        "1. **Input Lead Baru:** Langsung kirim teks deskripsi, link prospek, atau foto screenshot ke chat ini.\n"
-        "2. **Cek Status Pipeline:** Ketik /status\n"
-        "3. **Tandai Klien Balas Manual:** Ketik `/replied <email_atau_id>`\n"
+        "🤖 <b>Selamat Datang di Sales Command Center!</b>\n\n"
+        "Bot ini adalah pusat kendali otomatisasi prospek, integrasi Google Sheets, dan email outreach Anda.\n\n"
+        "💡 <b>Cara Cepat Memulai:</b>\n"
+        "1. <b>Input Lead:</b> Langsung kirim <b>teks obrolan, link medsos, atau screenshot gambar</b> ke chat ini.\n"
+        "2. <b>Lihat Panduan Lengkap:</b> Ketik <code>/help</code> untuk melihat seluruh perintah pengendali pipeline."
     )
-    bot.reply_to(message, text, parse_mode="Markdown")
+    bot.reply_to(message, text, parse_mode="HTML")
+
+
+@bot.message_handler(commands=["help"])
+def handle_help(message):
+    if not is_authorized(message):
+        return
+    text = (
+        "📖 <b>PANDUAN LENGKAP SALES COMMAND CENTER BOT</b>\n\n"
+        "📥 <b>1. Cara Input Prospek Baru:</b>\n"
+        "Cukup kirimkan teks postingan, link sosmed, atau screenshot gambar ke bot ini. AI Gemini akan otomatis mengekstrak nama, email, tipe project, dan kebutuhan usaha, lalu menampilkan kartu verifikasi.\n\n"
+        "🎮 <b>2. Daftar Perintah Pengendali Pipeline:</b>\n"
+        "• <code>/status</code> ➔ Melihat ringkasan jumlah prospek di setiap status pipeline secara live dari Google Sheets.\n"
+        "• <code>/replied &lt;email/id&gt;</code> ➔ Menandai prospek telah membalas email/chat (mematikan follow-up otomatis).\n"
+        "• <code>/scheduled &lt;email/id&gt;</code> ➔ Menandai meeting terjadwal secara manual jika klien sepakat meeting di WA tanpa lewat link Calendly.\n"
+        "• <code>/deal &lt;email/id&gt;</code> ➔ Menandai prospek resmi closing/membayar proyek 🎉\n"
+        "• <code>/nodeal &lt;email/id&gt;</code> ➔ Menandai batal closing setelah sesi meeting/diskusi.\n"
+        "• <code>/cleardraft</code> ➔ Menghapus antrean draft prospek di tab Leads_Draft jika ingin reset antrean.\n\n"
+        "🔄 <b>3. Siklus Status Prospek di Database:</b>\n"
+        "• <b>Baru:</b> Siap dikirimi email penawaran pertama oleh cron blaster.\n"
+        "• <b>WA_Manual:</b> Prospek tanpa email (hanya no WA/sosmed), wajib japri manual.\n"
+        "• <b>Penawaran Terkirim:</b> Email 1 terkirim, jeda 3 hari.\n"
+        "• <b>Follow Up 1:</b> Email FU1 terkirim, jeda 4 hari.\n"
+        "• <b>Follow Up 2:</b> Email pamungkas terkirim, outreach selesai.\n"
+        "• <b>Meeting Scheduled:</b> Jadwal meeting disepakati (Follow-up mati).\n"
+        "• <b>Replied:</b> Prospek membalas (Follow-up mati).\n"
+        "• <b>Deal / No Deal:</b> Hasil akhir negosiasi."
+    )
+    bot.reply_to(message, text, parse_mode="HTML")
+
+
+@bot.message_handler(commands=["cleardraft"])
+def handle_cleardraft(message):
+    if not is_authorized(message):
+        return
+    sheets.clear_draft()
+    bot.reply_to(message, "🧹 Antrean draft yang tertunda berhasil dibersihkan.")
 
 
 @bot.message_handler(commands=["status"])
@@ -44,32 +92,34 @@ def handle_status(message):
         return
     try:
         summary, total = sheets.get_pipeline_summary()
-        msg = f"📊 **Rekap Status Pipeline Leads**\nTotal: {total} prospek\n\n"
-        msg += f"🆕 Baru: {summary.get('Baru', 0)}\n"
-        msg += f"📤 Penawaran Terkirim: {summary.get('Penawaran Terkirim', 0)}\n"
-        msg += f"🔁 Follow Up 1: {summary.get('Follow Up 1', 0)}\n"
-        msg += f"🔁 Follow Up 2: {summary.get('Follow Up 2', 0)}\n"
-        msg += f"📅 Meeting Scheduled: {summary.get('Meeting Scheduled', 0)}\n"
-        msg += f"💬 Replied: {summary.get('Replied', 0)}\n"
-        msg += f"📱 WA Manual (Japri): {summary.get('WA_Manual', 0)}\n"
-        msg += f"🎉 Deal: {summary.get('Deal', 0)}\n"
-        msg += f"❌ No Deal: {summary.get('No Deal', 0)}\n"
-        bot.reply_to(message, msg, parse_mode="Markdown")
+        msg = (
+            f"📊 <b>Rekap Status Pipeline Leads</b>\n"
+            f"Total: <b>{total}</b> prospek\n\n"
+            f"🆕 Baru: {summary.get('Baru', 0)}\n"
+            f"📤 Penawaran Terkirim: {summary.get('Penawaran Terkirim', 0)}\n"
+            f"🔁 Follow Up 1: {summary.get('Follow Up 1', 0)}\n"
+            f"🔁 Follow Up 2: {summary.get('Follow Up 2', 0)}\n"
+            f"📅 Meeting Scheduled: {summary.get('Meeting Scheduled', 0)}\n"
+            f"💬 Replied: {summary.get('Replied', 0)}\n"
+            f"📱 WA Manual (Japri): {summary.get('WA_Manual', 0)}\n"
+            f"🎉 Deal: {summary.get('Deal', 0)}\n"
+            f"❌ No Deal: {summary.get('No Deal', 0)}\n"
+        )
+        bot.reply_to(message, msg, parse_mode="HTML")
     except Exception as e:
         logger.error(f"Error status command: {e}")
         bot.reply_to(message, f"❌ Gagal mengambil status dari Sheets: {e}")
 
 
-@bot.message_handler(commands=["replied", "pause"])
-def handle_manual_replied(message):
-    if not is_authorized(message):
-        return
+def _update_status_by_query(message, new_status: str, notes: str):
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
+        cmd = args[0]
         bot.reply_to(
             message,
-            "Gunakan format: `/replied <email_klien>` atau `/replied <lead_id>`",
-            parse_mode="Markdown",
+            f"Format salah. Gunakan: <code>{cmd} &lt;email_atau_id&gt;</code>\n"
+            f"Contoh: <code>{cmd} budi@gmail.com</code> atau <code>{cmd} LD-1234</code>",
+            parse_mode="HTML",
         )
         return
 
@@ -77,7 +127,7 @@ def handle_manual_replied(message):
     try:
         leads = sheets.get_leads()
         target = None
-        for l in leads:
+        for l in reversed(leads):
             if (
                 l.get("email", "").lower() == query.lower()
                 or l.get("lead_id", "").lower() == query.lower()
@@ -86,21 +136,70 @@ def handle_manual_replied(message):
                 break
 
         if not target:
-            bot.reply_to(message, f"❌ Prospek '{query}' tidak ditemukan di Sheet.")
+            bot.reply_to(message, f"❌ Prospek '{query}' tidak ditemukan di Google Sheets.")
             return
 
         sheets.update_lead_status(
             target["row_number"],
-            new_status="Replied",
-            notes="Ditandai manual via Telegram",
+            new_status=new_status,
+            notes=notes,
         )
+        nama = html.escape(str(target.get("nama") or "-"))
+        kontak = target.get("email") or target.get("lead_id")
         bot.reply_to(
             message,
-            f"✅ Status untuk *{target.get('nama')}* ({target.get('email')}) berhasil diubah ke *Replied*. Follow-up email dihentikan.",
-            parse_mode="Markdown",
+            f"✅ Status untuk <b>{nama}</b> (<code>{kontak}</code>) "
+            f"berhasil diubah ke: <b>{new_status}</b>.\n"
+            f"Catatan: <i>{notes}</i>",
+            parse_mode="HTML",
         )
     except Exception as e:
+        logger.error(f"Error update status via command: {e}")
         bot.reply_to(message, f"❌ Gagal update status: {e}")
+
+
+@bot.message_handler(commands=["replied", "pause"])
+def handle_manual_replied(message):
+    if not is_authorized(message):
+        return
+    _update_status_by_query(
+        message,
+        new_status="Replied",
+        notes="Ditandai Replied manual via Telegram (Follow-up mati)",
+    )
+
+
+@bot.message_handler(commands=["scheduled"])
+def handle_manual_scheduled(message):
+    if not is_authorized(message):
+        return
+    _update_status_by_query(
+        message,
+        new_status="Meeting Scheduled",
+        notes="Meeting terjadwal manual via Telegram (Follow-up mati)",
+    )
+
+
+@bot.message_handler(commands=["deal"])
+def handle_deal(message):
+    if not is_authorized(message):
+        return
+    _update_status_by_query(
+        message,
+        new_status="Deal",
+        notes="Closing penjualan berhasil! 🎉",
+    )
+
+
+@bot.message_handler(commands=["nodeal"])
+def handle_nodeal(message):
+    if not is_authorized(message):
+        return
+    _update_status_by_query(
+        message,
+        new_status="No Deal",
+        notes="Batal closing setelah sesi diskusi/meeting",
+    )
 
 
 @bot.message_handler(content_types=["text"])
@@ -116,12 +215,13 @@ def handle_text_lead(message):
     try:
         existing_draft = sheets.get_active_draft()
         if existing_draft:
+            nama_draft = html.escape(str(existing_draft.get('nama') or '-'))
             bot.reply_to(
                 message,
-                f"⚠️ **Masih Ada Draft Tertunda!**\n\n"
-                f"Prospek sebelumnya: *{existing_draft.get('nama')}* belum disimpan atau dibatalkan.\n"
-                f"Silakan klik tombol pada preview sebelumnya sebelum memasukkan prospek baru.",
-                parse_mode="Markdown",
+                f"⚠️ <b>Masih Ada Draft Tertunda!</b>\n\n"
+                f"Prospek sebelumnya: <b>{nama_draft}</b> belum disimpan atau dibatalkan.\n"
+                f"Ketik /cleardraft jika ingin mengabaikannya dan mulai baru.",
+                parse_mode="HTML",
             )
             return
     except Exception as e:
@@ -152,12 +252,13 @@ def handle_photo_lead(message):
     try:
         existing_draft = sheets.get_active_draft()
         if existing_draft:
+            nama_draft = html.escape(str(existing_draft.get('nama') or '-'))
             bot.reply_to(
                 message,
-                f"⚠️ **Masih Ada Draft Tertunda!**\n\n"
-                f"Prospek sebelumnya: *{existing_draft.get('nama')}* belum dikonfirmasi.\n"
-                f"Selesaikan draft sebelumnya terlebih dahulu.",
-                parse_mode="Markdown",
+                f"⚠️ <b>Masih Ada Draft Tertunda!</b>\n\n"
+                f"Prospek sebelumnya: <b>{nama_draft}</b> belum dikonfirmasi.\n"
+                f"Ketik /cleardraft jika ingin mengabaikannya dan mulai baru.",
+                parse_mode="HTML",
             )
             return
     except Exception as e:
@@ -192,20 +293,34 @@ def _send_preview(chat_id: int, lead: dict):
     btn_cancel = InlineKeyboardButton("❌ Batalkan", callback_data="cancel_draft")
     markup.row(btn_save, btn_cancel)
 
-    email_text = lead.get("email") or "_(Tidak ada email - Wajib Japri Manual)_"
+    lead_id = html.escape(str(lead.get("lead_id") or "-"))
+    nama = html.escape(str(lead.get("nama") or "-"))
+    email_val = lead.get("email")
+    if email_val:
+        email_text = f"<code>{html.escape(str(email_val))}</code>"
+    else:
+        email_text = "<i>(Tidak ada email - Wajib Japri Manual)</i>"
+
+    kontak = html.escape(str(lead.get("kontak_lain") or "-"))
+    tipe_proj = html.escape(str(lead.get("tipe_project") or "-"))
+    produk = html.escape(str(lead.get("nama_produk_atau_jasa") or "-"))
+    unggulan = html.escape(str(lead.get("poin_unggulan") or "-"))
+    kebutuhan = html.escape(str(lead.get("ringkasan_kebutuhan") or "-"))
+    status = html.escape(str(lead.get("status") or "-"))
+
     text = (
-        f"📋 **Preview Prospek Baru:**\n\n"
-        f"🆔 **ID:** `{lead.get('lead_id')}`\n"
-        f"👤 **Nama:** {lead.get('nama')}\n"
-        f"✉️ **Email:** {email_text}\n"
-        f"📞 **Kontak Lain:** {lead.get('kontak_lain') or '-'}\n"
-        f"🏷️ **Tipe:** {lead.get('tipe_project')} ({lead.get('nama_produk_atau_jasa')})\n"
-        f"💡 **Unggulan:** {lead.get('poin_unggulan')}\n"
-        f"📝 **Kebutuhan:** {lead.get('ringkasan_kebutuhan')}\n"
-        f"📌 **Target Status:** *{lead.get('status')}*\n\n"
+        f"📋 <b>Preview Prospek Baru:</b>\n\n"
+        f"🆔 <b>ID:</b> <code>{lead_id}</code>\n"
+        f"👤 <b>Nama:</b> {nama}\n"
+        f"✉️ <b>Email:</b> {email_text}\n"
+        f"📞 <b>Kontak Lain:</b> {kontak}\n"
+        f"🏷️ <b>Tipe:</b> {tipe_proj} ({produk})\n"
+        f"💡 <b>Unggulan:</b> {unggulan}\n"
+        f"📝 <b>Kebutuhan:</b> {kebutuhan}\n"
+        f"📌 <b>Target Status:</b> <b>{status}</b>\n\n"
         f"Simpan prospek ini ke spreadsheet?"
     )
-    bot.send_message(chat_id, text, reply_markup=markup, parse_mode="Markdown")
+    bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
 
 
 @bot.callback_query_handler(func=lambda call: True)
@@ -219,18 +334,27 @@ def handle_callback(call):
             saved = sheets.commit_draft()
             if saved:
                 bot.answer_callback_query(call.id, "✅ Tersimpan!")
+                nama = html.escape(str(saved.get("nama") or "-"))
+                produk = html.escape(str(saved.get("nama_produk_atau_jasa") or "-"))
+                status = html.escape(str(saved.get("status") or "-"))
                 feedback = (
-                    f"✅ **Prospek Berhasil Disimpan ke Leads!**\n\n"
-                    f"👤 Nama: *{saved.get('nama')}*\n"
-                    f"🏷️ Produk: *{saved.get('nama_produk_atau_jasa')}*\n"
-                    f"📌 Status: *{saved.get('status')}*\n"
+                    f"✅ <b>Prospek Berhasil Disimpan ke Leads!</b>\n\n"
+                    f"👤 Nama: <b>{nama}</b>\n"
+                    f"🏷️ Produk: <b>{produk}</b>\n"
+                    f"📌 Status: <b>{status}</b>\n"
                 )
                 if saved.get("status") == "WA_Manual":
+                    kontak = html.escape(str(saved.get("kontak_lain") or "-"))
                     feedback += (
-                        f"\n⚠️ *Perhatian:* Prospek ini tidak punya email. "
-                        f"Silakan langsung japri manual ke kontak: `{saved.get('kontak_lain')}`."
+                        f"\n⚠️ <i>Perhatian:</i> Prospek ini tidak punya email. "
+                        f"Silakan langsung japri manual ke kontak: <code>{kontak}</code>."
                     )
-                bot.edit_message_text(feedback, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
+                bot.edit_message_text(
+                    feedback,
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    parse_mode="HTML",
+                )
             else:
                 bot.answer_callback_query(call.id, "Draft sudah tidak ada / kosong.")
         except Exception as e:
@@ -240,7 +364,12 @@ def handle_callback(call):
         try:
             sheets.clear_draft()
             bot.answer_callback_query(call.id, "Draft dibatalkan.")
-            bot.edit_message_text("❌ **Draft dibatalkan.** Antrean telah dikosongkan.", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
+            bot.edit_message_text(
+                "❌ <b>Draft dibatalkan.</b> Antrean telah dikosongkan.",
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                parse_mode="HTML",
+            )
         except Exception as e:
             bot.answer_callback_query(call.id, f"Error: {e}")
 

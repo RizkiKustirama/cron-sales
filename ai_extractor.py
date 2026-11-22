@@ -63,16 +63,16 @@ def _clean_json_response(raw_text: str) -> dict:
         raise ValueError(f"Gagal mem-parsing output JSON: {raw_text}")
 
 
-def _call_gemini_api(parts: list) -> dict:
-    """Memanggil Gemini API via REST HTTPS dengan hemat request tanpa membakar kuota."""
-    # Gunakan model Pro & Flash dengan timeout 35 detik
-    candidate_models = [
-        "gemini-2.5-pro",
-        "gemini-3.7-flash",
-        "gemini-3.1-pro-preview",
-        "gemini-3.8-flash",
-    ]
-    headers = {"Content-Type": "application/json"}
+def _call_gemini_native(parts: list) -> dict:
+    """
+    Memanggil Gemini API via endpoint Native Google GenAI (generateContent).
+    Menggunakan konfigurasi yang terbukti andal di Synapseflow:
+    - Primary: gemini-3.5-flash-lite
+    - Fallback: gemini-3.5-flash
+    """
+    import time
+
+    models = ["gemini-3.5-flash-lite", "gemini-3.5-flash"]
     payload = {
         "contents": [{"parts": parts}],
         "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
@@ -83,31 +83,51 @@ def _call_gemini_api(parts: list) -> dict:
     }
 
     last_error = None
-    for model_name in candidate_models:
+    for model_name in models:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={config.GEMINI_API_KEY}"
-        try:
-            print(f"Mencoba model: {model_name}...")
-            resp = requests.post(url, headers=headers, json=payload, timeout=35)
-            if resp.status_code == 200:
-                data = resp.json()
-                raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
-                return _clean_json_response(raw_text)
-            else:
-                print(f"DEBUG: {model_name} -> HTTP {resp.status_code}: {resp.text[:120]}")
-                last_error = f"HTTP {resp.status_code} ({model_name})"
-                if resp.status_code == 429:
-                    break
-        except Exception as e:
-            print(f"DEBUG: {model_name} -> Exception: {e}")
-            last_error = str(e)
+        headers = {"Content-Type": "application/json"}
 
-    raise RuntimeError(f"Gagal memanggil Gemini API: {last_error}")
+        for attempt in range(1, 3):
+            try:
+                print(f"Mengirim analisis via native Google GenAI ({model_name}, coba {attempt}/2)...")
+                resp = requests.post(url, headers=headers, json=payload, timeout=45)
+
+                if resp.status_code == 200:
+                    data = resp.json()
+                    candidates = data.get("candidates", [])
+                    if candidates and "content" in candidates[0]:
+                        parts_resp = candidates[0]["content"].get("parts", [])
+                        if parts_resp and "text" in parts_resp[0]:
+                            return _clean_json_response(parts_resp[0]["text"])
+                    raise ValueError(f"Format respon Gemini kosong/tidak terduga: {resp.text}")
+
+                elif resp.status_code in [503, 429]:
+                    print(f"⚠️ Status {resp.status_code} pada {model_name}. Menunggu 2 detik...")
+                    time.sleep(2)
+                    last_error = f"HTTP {resp.status_code} ({model_name})"
+                    continue
+                else:
+                    print(f"Status {resp.status_code} ({model_name}): {resp.text[:120]}")
+                    last_error = f"HTTP {resp.status_code}: {resp.text}"
+                    break
+            except requests.exceptions.Timeout:
+                print(f"Koneksi timeout 45 detik pada {model_name} (percobaan {attempt})...")
+                last_error = f"Timeout ({model_name})"
+                time.sleep(1)
+                continue
+            except Exception as e:
+                print(f"Kendala teknis ({model_name}): {e}")
+                last_error = str(e)
+                time.sleep(1)
+                continue
+
+    raise RuntimeError(f"Gagal memanggil Gemini API via native endpoint: {last_error}")
 
 
 def extract_lead_from_text(text: str) -> dict:
     """Mengekstrak data lead dari input teks atau link."""
     parts = [{"text": f"Ekstrak data prospek berikut:\n\n{text}"}]
-    parsed = _call_gemini_api(parts)
+    parsed = _call_gemini_native(parts)
     return _build_lead_object(parsed, raw_source=text)
 
 
@@ -122,10 +142,10 @@ def extract_lead_from_image(image: Image.Image, caption: str = "") -> dict:
         prompt_text += f" Catatan tambahan pengirim: {caption}"
 
     parts = [
-        {"text": prompt_text},
         {"inlineData": {"mimeType": "image/jpeg", "data": img_b64}},
+        {"text": prompt_text},
     ]
-    parsed = _call_gemini_api(parts)
+    parsed = _call_gemini_native(parts)
     return _build_lead_object(parsed, raw_source=f"Screenshot + Caption: {caption}")
 
 

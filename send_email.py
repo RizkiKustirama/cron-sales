@@ -1,3 +1,4 @@
+import html
 import smtplib
 import ssl
 import time
@@ -6,6 +7,7 @@ import logging
 from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.utils import formatdate, make_msgid
 
 import config
 from sheets_helper import sheets
@@ -14,7 +16,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def send_telegram_alert(text: str):
+def send_telegram_alert(text: str, parse_mode: str = "HTML"):
     """Mengirim pesan notifikasi / laporan ke akun Telegram admin."""
     if not config.TELEGRAM_BOT_TOKEN or not config.TELEGRAM_ALLOWED_CHAT_ID:
         return
@@ -23,10 +25,12 @@ def send_telegram_alert(text: str):
     payload = {
         "chat_id": config.TELEGRAM_ALLOWED_CHAT_ID,
         "text": text,
-        "parse_mode": "Markdown",
+        "parse_mode": parse_mode,
     }
     try:
-        requests.post(url, json=payload, timeout=10)
+        resp = requests.post(url, json=payload, timeout=10)
+        if resp.status_code != 200:
+            logger.warning(f"Gagal kirim notif Telegram HTTP {resp.status_code}: {resp.text}")
     except Exception as e:
         logger.warning(f"Gagal mengirim laporan Telegram: {e}")
 
@@ -76,11 +80,13 @@ def render_email_content(lead: dict, template: dict) -> tuple[str, str]:
     body = template.get("body", "")
 
     for key, val in [
+        ("{{nama}}", nama_lengkap),
         ("{{nama_depan}}", nama_depan),
         ("{{nama_produk_atau_jasa}}", produk),
         ("{{poin_unggulan}}", poin),
         ("{{ringkasan_kebutuhan}}", kebutuhan),
         ("{{link_booking}}", link_booking),
+        ("{{sender_name}}", config.GMAIL_SENDER_NAME),
     ]:
         subject = subject.replace(key, val)
         body = body.replace(key, val)
@@ -89,10 +95,13 @@ def render_email_content(lead: dict, template: dict) -> tuple[str, str]:
 
 
 def send_smtp_email(to_email: str, subject: str, body: str):
-    """Mengirim email melalui SMTP SSL Gmail."""
+    """Mengirim email melalui SMTP SSL Gmail dengan header standar RFC."""
     msg = MIMEMultipart()
     msg["From"] = f"{config.GMAIL_SENDER_NAME} <{config.GMAIL_SENDER_EMAIL}>"
     msg["To"] = to_email
+    msg["Reply-To"] = config.GMAIL_SENDER_EMAIL
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain="gmail.com")
     msg["Subject"] = subject
 
     msg.attach(MIMEText(body, "plain", "utf-8"))
@@ -204,7 +213,9 @@ def run_blaster():
             )
 
             sent_count += 1
-            sent_details.append(f"• {lead.get('nama')} ({lead.get('nama_produk_atau_jasa')}) ➔ *{new_status}*")
+            nama_clean = html.escape(str(lead.get("nama") or "-"))
+            produk_clean = html.escape(str(lead.get("nama_produk_atau_jasa") or "-"))
+            sent_details.append(f"• <b>{nama_clean}</b> ({produk_clean}) ➔ <b>{new_status}</b>")
 
             # Jeda acak antar email (kecuali pada pengiriman terakhir)
             if idx < total_candidates - 1:
@@ -220,12 +231,12 @@ def run_blaster():
 
     # Kirim laporan rekap ke Telegram
     report_msg = (
-        f"📬 **Laporan Email Blaster Hari Ini ({today_str})**\n\n"
-        f"Total Terkirim: *{sent_count} email*\n"
+        f"📬 <b>Laporan Email Blaster Hari Ini ({today_str})</b>\n\n"
+        f"Total Terkirim: <b>{sent_count} email</b>\n"
         + "\n".join(sent_details)
         + "\n\nStatus di Google Sheets telah diperbarui."
     )
-    send_telegram_alert(report_msg)
+    send_telegram_alert(report_msg, parse_mode="HTML")
     logger.info("Pengiriman email hari ini selesai.")
 
 
