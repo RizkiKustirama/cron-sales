@@ -24,7 +24,7 @@ ATURAN UTAMA:
    a. Jika usaha kuliner, cafe, resto, depot (contoh: Cwie Mie, resto, warung, kedai):
       - tipe_project: "saas_ready"
       - nama_produk_atau_jasa: "POS"
-   b. Jika sekolah, SMK, LPK, akademi, kampus vokasi, lembaga kursus:
+   b. Jika sekolah, SMK, LPK, bimbel, akademi, lembaga kursus, pesantren, atau institusi pendidikan:
       - tipe_project: "saas_ready"
       - nama_produk_atau_jasa: "LMS_Vokasi"
    c. Jika membicarakan pembuatan web/mobile sistem khusus di luar di atas:

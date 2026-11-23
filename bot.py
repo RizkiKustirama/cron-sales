@@ -1,6 +1,8 @@
 import html
 import io
 import logging
+import re
+import urllib.parse
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from PIL import Image
@@ -355,12 +357,55 @@ def handle_photo_lead(message):
         )
 
 
+def _extract_clean_phone(raw_str: str) -> str:
+    """Mencari digit nomor telepon dan mengubah ke format internasional 628xxx."""
+    if not raw_str:
+        return ""
+    match = re.search(r"(?:\+?62|0)8[0-9\s\-]{7,14}", str(raw_str))
+    if match:
+        digits = re.sub(r"\D", "", match.group(0))
+        if digits.startswith("0"):
+            digits = "62" + digits[1:]
+        elif digits.startswith("8"):
+            digits = "628" + digits[1:]
+        return digits
+    return ""
+
+
+def _build_wa_pitch_message(lead: dict) -> str:
+    """Menyusun draf pesan WhatsApp business casual yang sopan dan relevan."""
+    nama = str(lead.get("nama") or "Kak/Admin").strip()
+    kebutuhan = str(lead.get("ringkasan_kebutuhan") or "operasional usaha").strip()
+    poin = str(lead.get("poin_unggulan") or "solusi sistem siap pakai").strip()
+    sender = config.GMAIL_SENDER_NAME.split()[0] if config.GMAIL_SENDER_NAME else "Rizki"
+
+    msg = (
+        f"Halo Kak/Admin {nama}, salam kenal ya Kak 🙏\n\n"
+        f"Saya {sender}, kebetulan perhatikan usaha {nama} makin berkembang.\n\n"
+        f"Biasanya di fase seperti saat ini, {kebutuhan} cukup menyita waktu jika masih dikelola manual. "
+        f"Kebetulan kami biasa buatkan solusi sistem/web yang siap pakai dan disesuaikan khusus untuk alur bisnis seperti {nama} ({poin}).\n\n"
+        f"Kira-kira apakah berkenan kalau saya bagikan gambaran singkat/contoh demonya lewat chat sini Kak? "
+        f"Santai saja Kak, barangkali bisa bermanfaat untuk {nama}.\n\n"
+        f"Terima kasih banyak atas waktunya Kak!"
+    )
+    return msg
+
+
 def _send_preview(chat_id: int, lead: dict):
-    """Mengirim pesan preview ke Telegram lengkap dengan 2 tombol Inline."""
+    """Mengirim pesan preview ke Telegram lengkap dengan tombol simpan & WhatsApp."""
     markup = InlineKeyboardMarkup()
     btn_save = InlineKeyboardButton("✅ Simpan ke Leads", callback_data="save_draft")
     btn_cancel = InlineKeyboardButton("❌ Batalkan", callback_data="cancel_draft")
     markup.row(btn_save, btn_cancel)
+
+    clean_phone = _extract_clean_phone(lead.get("kontak_lain") or "")
+    is_wa_manual = lead.get("status") == "WA_Manual" or not lead.get("email")
+
+    if is_wa_manual and clean_phone:
+        pitch = _build_wa_pitch_message(lead)
+        encoded_pitch = urllib.parse.quote(pitch)
+        btn_wa = InlineKeyboardButton("📲 Buka WhatsApp Sekarang", url=f"https://wa.me/{clean_phone}?text={encoded_pitch}")
+        markup.row(btn_wa)
 
     lead_id = html.escape(str(lead.get("lead_id") or "-"))
     nama = html.escape(str(lead.get("nama") or "-"))
@@ -387,8 +432,15 @@ def _send_preview(chat_id: int, lead: dict):
         f"💡 <b>Unggulan:</b> {unggulan}\n"
         f"📝 <b>Kebutuhan:</b> {kebutuhan}\n"
         f"📌 <b>Target Status:</b> <b>{status}</b>\n\n"
-        f"Simpan prospek ini ke spreadsheet?"
     )
+
+    if is_wa_manual and clean_phone:
+        text += (
+            f"💬 <b>Draf Pesan WhatsApp Siap Kirim:</b>\n"
+            f"<pre>{html.escape(_build_wa_pitch_message(lead))}</pre>\n\n"
+        )
+
+    text += "Simpan prospek ini ke spreadsheet?"
     bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
 
 
@@ -412,16 +464,30 @@ def handle_callback(call):
                     f"🏷️ Produk: <b>{produk}</b>\n"
                     f"📌 Status: <b>{status}</b>\n"
                 )
+                wa_markup = None
                 if saved.get("status") == "WA_Manual":
                     kontak = html.escape(str(saved.get("kontak_lain") or "-"))
+                    clean_phone = _extract_clean_phone(saved.get("kontak_lain") or "")
                     feedback += (
-                        f"\n⚠️ <i>Perhatian:</i> Prospek ini tidak punya email. "
-                        f"Silakan langsung japri manual ke kontak: <code>{kontak}</code>."
+                        f"\n⚠️ <i>Perhatian:</i> Prospek ini tidak punya email.\n"
+                        f"Silakan langsung japri manual ke kontak: <code>{kontak}</code>.\n"
                     )
+                    if clean_phone:
+                        pitch = _build_wa_pitch_message(saved)
+                        encoded_pitch = urllib.parse.quote(pitch)
+                        wa_markup = InlineKeyboardMarkup()
+                        wa_markup.row(InlineKeyboardButton("📲 Buka WhatsApp Sekarang", url=f"https://wa.me/{clean_phone}?text={encoded_pitch}"))
+                        feedback += (
+                            f"\n💬 <b>Draf Pesan WhatsApp:</b>\n"
+                            f"<pre>{html.escape(pitch)}</pre>\n"
+                            f"👉 <i>Klik tombol di bawah untuk langsung membuka WhatsApp dengan pesan ini!</i>"
+                        )
+
                 bot.edit_message_text(
                     feedback,
                     chat_id=call.message.chat.id,
                     message_id=call.message.message_id,
+                    reply_markup=wa_markup,
                     parse_mode="HTML",
                 )
             else:
