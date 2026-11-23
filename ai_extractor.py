@@ -87,10 +87,10 @@ def _call_gemini_native(parts: list) -> dict:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={config.GEMINI_API_KEY}"
         headers = {"Content-Type": "application/json"}
 
-        for attempt in range(1, 3):
+        for attempt in range(1, 4):
             try:
-                print(f"Mengirim analisis via native Google GenAI ({model_name}, coba {attempt}/2)...")
-                resp = requests.post(url, headers=headers, json=payload, timeout=45)
+                print(f"Mengirim analisis via native Google GenAI ({model_name}, coba {attempt}/3)...")
+                resp = requests.post(url, headers=headers, json=payload, timeout=30)
 
                 if resp.status_code == 200:
                     data = resp.json()
@@ -102,8 +102,9 @@ def _call_gemini_native(parts: list) -> dict:
                     raise ValueError(f"Format respon Gemini kosong/tidak terduga: {resp.text}")
 
                 elif resp.status_code in [503, 429]:
-                    print(f"⚠️ Status {resp.status_code} pada {model_name}. Menunggu 2 detik...")
-                    time.sleep(2)
+                    sleep_sec = attempt * 2
+                    print(f"⚠️ Status {resp.status_code} pada {model_name}. Menunggu {sleep_sec} detik...")
+                    time.sleep(sleep_sec)
                     last_error = f"HTTP {resp.status_code} ({model_name})"
                     continue
                 else:
@@ -111,7 +112,7 @@ def _call_gemini_native(parts: list) -> dict:
                     last_error = f"HTTP {resp.status_code}: {resp.text}"
                     break
             except requests.exceptions.Timeout:
-                print(f"Koneksi timeout 45 detik pada {model_name} (percobaan {attempt})...")
+                print(f"Koneksi timeout pada {model_name} (percobaan {attempt}/3)...")
                 last_error = f"Timeout ({model_name})"
                 time.sleep(1)
                 continue
